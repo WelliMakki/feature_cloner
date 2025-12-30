@@ -1,0 +1,24 @@
+# Development files
+.vscode/**
+.vscode-test/**
+src/**
+.gitignore
+tsconfig.json
+build.js
+node_modules/**
+*.map
+
+# Test examples (not needed in production)
+test-examples/**
+
+# Documentation (keep only README.md)
+INSTALLATION.md
+TESTING.md
+USAGE_EXAMPLES.md
+QUICKSTART.md
+PROJECT_SUMMARY.md
+
+# Git files
+.git/**
+.github/**
+
