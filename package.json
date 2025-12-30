@@ -2,7 +2,7 @@
   "name": "feature-cloner",
   "displayName": "Feature Cloner",
   "description": "Intelligently clone feature folder structures with automatic architecture detection",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -11,6 +11,7 @@
     "type": "git",
     "url": "https://github.com/WelliMakki/feature_cloner"
   },
+  "icon": "images/icon.png",
   "license": "MIT",
   "keywords": [
     "vscode-extension",
