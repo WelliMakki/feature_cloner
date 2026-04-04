@@ -2,7 +2,7 @@
   "name": "feature-cloner",
   "displayName": "Feature Cloner",
   "description": "Intelligently clone feature folder structures with automatic architecture detection",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "engines": {
     "vscode": "^1.75.0"
   },
