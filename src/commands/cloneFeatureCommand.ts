@@ -4,14 +4,53 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { StructureScanner } from '../scanner/structureScanner';
 import { PatternAnalyzer } from '../scanner/patternAnalyzer';
-import { SmartCloner } from '../cloner/smartCloner';
+import { SmartCloner, CloneOptions, CloneScopeMode } from '../cloner/smartCloner';
 
 export class CloneFeatureCommand {
   private scanner: StructureScanner;
   private analyzer: PatternAnalyzer;
   private cloner: SmartCloner;
+  private readonly knownSubfolderNames = new Set([
+    'provider',
+    'providers',
+    'presentation',
+    'domain',
+    'data',
+    'model',
+    'models',
+    'view',
+    'views',
+    'viewmodel',
+    'viewmodels',
+    'controller',
+    'controllers',
+    'service',
+    'services',
+    'repository',
+    'repositories',
+    'hook',
+    'hooks',
+    'component',
+    'components',
+    'route',
+    'routes',
+    'screen',
+    'screens',
+    'bloc',
+    'blocs',
+    'cubit',
+    'cubits',
+    'notifier',
+    'notifiers',
+    'state',
+    'states',
+    'utils',
+    'helper',
+    'helpers'
+  ]);
 
   constructor() {
     this.scanner = new StructureScanner();
@@ -30,6 +69,9 @@ export class CloneFeatureCommand {
         return;
       }
 
+      // Resolve whether user selected a feature root or a subfolder inside a feature
+      const selectionContext = await this.resolveSelectionContext(folderPath);
+
       // Step 1 & 2: Scan and analyze with progress
       const { structure, pattern } = await vscode.window.withProgress(
         {
@@ -39,7 +81,7 @@ export class CloneFeatureCommand {
         },
         async (progress) => {
           progress.report({ message: 'Scanning folder structure...' });
-          const structure = await this.scanner.scan(folderPath);
+          const structure = await this.scanner.scan(selectionContext.sourceFolderPath);
 
           progress.report({ message: 'Detecting architecture pattern...' });
           const pattern = this.analyzer.analyze(structure);
@@ -62,20 +104,58 @@ export class CloneFeatureCommand {
         return;
       }
 
-      // Step 5: Determine target directory
-      const targetDirectory = path.dirname(folderPath);
+      // Step 5: Select clone scope (full feature or specific subfolder(s))
+      const cloneScope = selectionContext.forcedSubfolderName
+        ? {
+            scopeMode: 'subfolders' as CloneScopeMode,
+            selectedSubfolders: [selectionContext.forcedSubfolderName]
+          }
+        : await this.getCloneScope(structure);
+      if (!cloneScope) {
+        vscode.window.showInformationMessage('Clone operation cancelled.');
+        return;
+      }
 
-      // Step 6: Show preview of what will be created (OUTSIDE progress)
-      const preview = await this.cloner.preview(structure, {
+      // Step 6: Determine target directory
+      const targetDirectory = path.dirname(selectionContext.sourceFolderPath);
+      const cloneOptions: CloneOptions = {
         sourceFeatureName: structure.featureName,
         targetFeatureName: newFeatureName,
-        targetDirectory
-      });
+        targetDirectory,
+        scopeMode: cloneScope.scopeMode,
+        selectedSubfolders: cloneScope.selectedSubfolders
+      };
+
+      // Step 7: Build preview paths once (used for conflict checks and UI preview)
+      const preview = await this.cloner.preview(structure, cloneOptions);
+
+      const targetFeaturePath = path.join(targetDirectory, newFeatureName);
+      const isSubfolderClone = cloneOptions.scopeMode === 'subfolders' || (cloneOptions.selectedSubfolders?.length ?? 0) > 0;
+      if (isSubfolderClone && await this.pathExists(targetFeaturePath)) {
+        const selected = (cloneOptions.selectedSubfolders ?? []).join(', ');
+        const conflicts = await this.getExistingFileConflicts(preview);
+        const conflictDetails = this.buildConflictSummary(conflicts, targetFeaturePath);
+        const action = await vscode.window.showWarningMessage(
+          `Feature "${newFeatureName}" already exists. Merge cloned subfolder(s) (${selected}) into it?\n\n${conflictDetails}`,
+          { modal: true },
+          'Merge',
+          'Cancel'
+        );
+
+        if (action !== 'Merge') {
+          vscode.window.showInformationMessage('Clone operation cancelled.');
+          return;
+        }
+
+        cloneOptions.allowMergeIntoExistingRoot = true;
+      }
+
+      // Step 8: Show preview of what will be created (OUTSIDE progress)
 
       const proceedWithClone = await this.showClonePreview(
         newFeatureName,
         preview,
-        structure
+        cloneOptions
       );
 
       if (!proceedWithClone) {
@@ -83,8 +163,8 @@ export class CloneFeatureCommand {
         return;
       }
 
-      // Step 7: Perform the clone with progress
-      const result = await vscode.window.withProgress(
+      // Step 9: Perform the clone with progress
+      let result = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
           title: `Cloning feature: ${newFeatureName}...`,
@@ -92,15 +172,42 @@ export class CloneFeatureCommand {
         },
         async (progress) => {
           progress.report({ message: 'Creating files and folders...' });
-          return await this.cloner.clone(structure, {
-            sourceFeatureName: structure.featureName,
-            targetFeatureName: newFeatureName,
-            targetDirectory
-          });
+          return await this.cloner.clone(structure, cloneOptions);
         }
       );
 
-      // Step 8: Show results (OUTSIDE progress)
+      // Defensive fallback: if pre-check missed, offer merge and retry once.
+      if (
+        !result.success &&
+        this.hasTargetAlreadyExistsError(result.errors) &&
+        !cloneOptions.allowMergeIntoExistingRoot
+      ) {
+        const conflicts = await this.getExistingFileConflicts(preview);
+        const conflictDetails = this.buildConflictSummary(conflicts, targetFeaturePath);
+        const retryAction = await vscode.window.showWarningMessage(
+          `Feature "${newFeatureName}" already exists. Merge and retry?\n\n${conflictDetails}`,
+          { modal: true },
+          'Merge and Retry',
+          'Cancel'
+        );
+
+        if (retryAction === 'Merge and Retry') {
+          cloneOptions.allowMergeIntoExistingRoot = true;
+          result = await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: `Merging into feature: ${newFeatureName}...`,
+              cancellable: false
+            },
+            async (progress) => {
+              progress.report({ message: 'Merging files and folders...' });
+              return await this.cloner.clone(structure, cloneOptions);
+            }
+          );
+        }
+      }
+
+      // Step 10: Show results (OUTSIDE progress)
       if (result.success) {
         const message = `Successfully created feature "${newFeatureName}" with ${result.filesCreated} files in ${result.directoriesCreated} directories.`;
         const openFolder = 'Open Folder';
@@ -118,6 +225,101 @@ export class CloneFeatureCommand {
     } catch (error) {
       vscode.window.showErrorMessage(`Error cloning feature: ${error}`);
     }
+  }
+
+  /**
+   * Resolve whether the selected path is a feature root or a known feature subfolder.
+   */
+  private async resolveSelectionContext(
+    selectedFolderPath: string
+  ): Promise<{ sourceFolderPath: string; forcedSubfolderName?: string }> {
+    const selectedFolderName = path.basename(selectedFolderPath).toLowerCase();
+    if (!this.knownSubfolderNames.has(selectedFolderName)) {
+      return { sourceFolderPath: selectedFolderPath };
+    }
+
+    const parentPath = path.dirname(selectedFolderPath);
+    if (parentPath === selectedFolderPath) {
+      return { sourceFolderPath: selectedFolderPath };
+    }
+
+    try {
+      const siblings = await fs.promises.readdir(parentPath, { withFileTypes: true });
+      const siblingDirNames = siblings
+        .filter(entry => entry.isDirectory())
+        .map(entry => entry.name.toLowerCase());
+
+      const knownSiblingCount = siblingDirNames.filter(name => this.knownSubfolderNames.has(name)).length;
+      if (knownSiblingCount >= 2) {
+        return {
+          sourceFolderPath: parentPath,
+          forcedSubfolderName: path.basename(selectedFolderPath)
+        };
+      }
+    } catch {
+      // Fall back to selected folder if parent can't be inspected
+    }
+
+    return { sourceFolderPath: selectedFolderPath };
+  }
+
+  /**
+   * Check if a path already exists.
+   */
+  private async pathExists(filePath: string): Promise<boolean> {
+    try {
+      await fs.promises.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Return existing file paths that would be overwritten by clone output.
+   */
+  private async getExistingFileConflicts(targetPaths: string[]): Promise<string[]> {
+    const checks = await Promise.all(
+      targetPaths.map(async (targetPath) => {
+        try {
+          const stat = await fs.promises.stat(targetPath);
+          return stat.isFile() ? targetPath : undefined;
+        } catch {
+          return undefined;
+        }
+      })
+    );
+
+    return checks.filter((value): value is string => typeof value === 'string');
+  }
+
+  /**
+   * Build human-readable conflict summary for merge confirmation.
+   */
+  private buildConflictSummary(conflicts: string[], targetFeaturePath: string): string {
+    if (conflicts.length === 0) {
+      return 'No existing file conflicts detected. New files and folders will be merged into the existing feature.';
+    }
+
+    const previewLimit = 5;
+    const listed = conflicts.slice(0, previewLimit).map(conflictPath => {
+      const relativePath = path.relative(targetFeaturePath, conflictPath);
+      return `- ${relativePath}`;
+    });
+
+    const remaining = conflicts.length - listed.length;
+    if (remaining > 0) {
+      listed.push(`- ...and ${remaining} more file(s)`);
+    }
+
+    return `Detected ${conflicts.length} existing file(s) that will be overwritten:\n${listed.join('\n')}`;
+  }
+
+  /**
+   * Identify target-exists guard errors from cloner result.
+   */
+  private hasTargetAlreadyExistsError(errors: string[]): boolean {
+    return errors.some(error => error.toLowerCase().includes('target directory already exists'));
   }
 
   /**
@@ -275,13 +477,83 @@ export class CloneFeatureCommand {
   }
 
   /**
+   * Let user choose full clone or specific subfolder(s)
+   */
+  private async getCloneScope(
+    structure: any
+  ): Promise<{ scopeMode: CloneScopeMode; selectedSubfolders?: string[] } | undefined> {
+    const scopeSelection = await vscode.window.showQuickPick(
+      [
+        {
+          label: 'Clone full feature',
+          description: 'Copy all matching files and folders',
+          scopeMode: 'full' as CloneScopeMode
+        },
+        {
+          label: 'Clone specific subfolder(s)',
+          description: 'Choose one or more top-level folders only',
+          scopeMode: 'subfolders' as CloneScopeMode
+        }
+      ],
+      {
+        title: 'Choose clone scope',
+        placeHolder: 'Select how much of the feature to clone',
+        canPickMany: false,
+        ignoreFocusOut: true
+      }
+    );
+
+    if (!scopeSelection) {
+      return undefined;
+    }
+
+    if (scopeSelection.scopeMode === 'full') {
+      return { scopeMode: 'full' };
+    }
+
+    const availableSubfolders = (structure.layers ?? []).filter((layer: string) => layer.trim().length > 0);
+    if (availableSubfolders.length === 0) {
+      vscode.window.showWarningMessage('No top-level subfolders found. Falling back to full clone.');
+      return { scopeMode: 'full' };
+    }
+
+    const selectedSubfolders = await vscode.window.showQuickPick(
+      availableSubfolders.map((layer: string) => ({
+        label: layer,
+        description: `Clone only ${layer}/ into ${structure.featureName}`
+      })),
+      {
+        title: 'Select subfolder(s) to clone',
+        placeHolder: 'Choose one or more top-level folders',
+        canPickMany: true,
+        ignoreFocusOut: true
+      }
+    );
+
+    if (!selectedSubfolders || selectedSubfolders.length === 0) {
+      return undefined;
+    }
+
+    return {
+      scopeMode: 'subfolders',
+      selectedSubfolders: selectedSubfolders.map(item => item.label)
+    };
+  }
+
+  /**
    * Show preview of what will be created
    */
   private async showClonePreview(
     newFeatureName: string,
     preview: string[],
-    structure: any
+    cloneOptions: CloneOptions
   ): Promise<boolean> {
+    const scopedFileCount = preview.filter(p => path.extname(p).length > 0).length;
+    const scopedDirectoryCount = Math.max(preview.length - scopedFileCount, 0);
+    const scopeDetail = cloneOptions.scopeMode === 'subfolders'
+      ? `Subfolders: ${(cloneOptions.selectedSubfolders ?? []).join(', ')}`
+      : 'Scope: full feature';
+
     // Create QuickPick items from preview
     const quickPick = vscode.window.createQuickPick();
     quickPick.title = `Create Feature: ${newFeatureName}`;
@@ -309,9 +581,9 @@ export class CloneFeatureCommand {
         kind: vscode.QuickPickItemKind.Separator
       },
       {
-        label: `${structure.totalFiles} files and ${structure.totalDirectories} directories will be created`,
+        label: `${scopedFileCount} files and ${scopedDirectoryCount} directories will be created`,
         description: '',
-        detail: undefined
+        detail: scopeDetail
       },
       {
         label: '',
