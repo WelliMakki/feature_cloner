@@ -7,6 +7,7 @@ import { FileNode } from '../utils/fileSystem';
 import { ensureDirectory, readFileContent, writeFileContent, pathExists } from '../utils/fileSystem';
 import { ContentReplacer } from './contentReplacer';
 import { ScannedStructure } from '../scanner/structureScanner';
+import { toPascalCase } from '../utils/naming';
 
 export type CloneScopeMode = 'full' | 'subfolders';
 
@@ -72,6 +73,11 @@ export class SmartCloner {
         result
       );
 
+      // For React/TS projects, create a placeholder Page file
+      if (!normalizedOptions.dryRun) {
+        await this.createReactPageIfNeeded(structure.fileTree, targetPath, normalizedOptions, result);
+      }
+
       result.success = result.errors.length === 0;
     } catch (error) {
       result.success = false;
@@ -118,7 +124,7 @@ export class SmartCloner {
               options.targetFeatureName
             );
             const childPath = path.join(targetPath, childName);
-            
+
             // For directories, always clone. For files, check if it should be cloned
             if (child.isDirectory || this.shouldCloneFile(child, options)) {
               await this.cloneNode(child, childPath, options, result, childRelativePath);
@@ -199,7 +205,7 @@ export class SmartCloner {
 
     const paths: string[] = [];
     this.collectPaths(structure.fileTree, targetPath, normalizedOptions, paths);
-    
+
     return paths;
   }
 
@@ -382,6 +388,65 @@ export class SmartCloner {
    */
   private normalizeCompact(value: string): string {
     return value.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  }
+
+  /**
+   * Detect if the source feature is a React/TS project and create a placeholder Page file.
+   */
+  private async createReactPageIfNeeded(
+    fileTree: FileNode,
+    targetPath: string,
+    options: CloneOptions,
+    result: CloneResult
+  ): Promise<void> {
+    const ext = this.detectReactExtension(fileTree);
+    if (!ext) {
+      return;
+    }
+
+    const pagePath = path.join(targetPath, `Page${ext}`);
+    if (await pathExists(pagePath)) {
+      return;
+    }
+
+    const componentName = toPascalCase(options.targetFeatureName) + 'Page';
+    const content = ext === '.tsx'
+      ? `import React from 'react';\n\nconst ${componentName} = () => {\n  return (\n    <div>\n      <h1>${componentName}</h1>\n      <p>\n        Hello, Thanks for using Feature Cloner, contribute or star:{'⭐️'}\n        <a href=\"https://github.com/WelliMakki/feature_cloner\">\n          https://github.com/WelliMakki/feature_cloner\n        </a>\n      </p>\n    </div>\n  );\n};\n\nexport default ${componentName};\n`
+      : `const ${componentName} = () => {\n  return (\n    <div>\n      <h1>${componentName}</h1>\n      <p>\n        Hello, Thanks for using Feature Cloner, contribute or star:{'⭐️'}\n        <a href=\"https://github.com/WelliMakki/feature_cloner\">\n          https://github.com/WelliMakki/feature_cloner\n        </a>\n      </p>\n    </div>\n  );\n};\n\nexport default ${componentName};\n`;
+
+    try {
+      await writeFileContent(pagePath, content);
+      result.filesCreated++;
+      result.createdPaths.push(pagePath);
+    } catch (error) {
+      result.errors.push(`Error creating Page file: ${error}`);
+    }
+  }
+
+  /**
+   * Check if the source file tree contains React/TS files and return the preferred extension.
+   * Returns '.tsx', '.jsx', or null if not a React/TS project.
+   */
+  private detectReactExtension(node: FileNode): string | null {
+    const extensions = new Set<string>();
+    this.collectFileExtensions(node, extensions);
+
+    if (extensions.has('.tsx')) { return '.tsx'; }
+    if (extensions.has('.jsx')) { return '.jsx'; }
+    return null;
+  }
+
+  private collectFileExtensions(node: FileNode, extensions: Set<string>): void {
+    if (!node.isDirectory) {
+      const ext = path.extname(node.name).toLowerCase();
+      if (ext) { extensions.add(ext); }
+      return;
+    }
+    if (node.children) {
+      for (const child of node.children) {
+        this.collectFileExtensions(child, extensions);
+      }
+    }
   }
 
   /**
