@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [1.0.5] - 2026-04-05
 
+### Added
+- **React & TypeScript support**: When cloning a feature that contains `.tsx` or `.jsx` files, the cloner now automatically generates a `page.tsx` / `page.jsx` with a placeholder component, ready to build on.
+- Expanded known subfolder detection to cover common React/TS conventions: `api`, `types`, `store`, `pages`, `reducers`, `actions`, `sagas`, `selectors`, `__tests__`, and more.
+
 ### Fixed
 - Fixed file and path naming when cloning single-word features (e.g. `brand` → `bug_report`). Previously, file names like `brand_details_cubit.dart` were incorrectly renamed to `bugReport_details_cubit.dart` instead of `bug_report_details_cubit.dart`. The cloner now detects the surrounding context (`_`, `-`, uppercase letter) to apply the correct case variant, while class names and variables continue to follow language conventions (`BugReportDetailsCubit`, `bugReportSlug`).
 
