@@ -404,7 +404,7 @@ export class SmartCloner {
       return;
     }
 
-    const pagePath = path.join(targetPath, `Page${ext}`);
+    const pagePath = path.join(targetPath, `page${ext}`);
     if (await pathExists(pagePath)) {
       return;
     }
