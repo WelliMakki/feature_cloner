@@ -2,7 +2,7 @@
  * Content replacer - intelligently replaces feature names in file content
  */
 
-import { getAllCaseVariations, extractWords, CaseType } from '../utils/naming';
+import { getAllCaseVariations, extractWords, CaseType, detectCaseType } from '../utils/naming';
 
 export interface ReplacementMap {
   from: Map<CaseType, string>;
@@ -14,36 +14,8 @@ export class ContentReplacer {
    * Replace all occurrences of old feature name with new feature name in content
    */
   replaceContent(content: string, oldFeatureName: string, newFeatureName: string): string {
-    // Get all case variations
-    const oldVariations = getAllCaseVariations(oldFeatureName);
-    const newVariations = getAllCaseVariations(newFeatureName);
-    
-    let result = content;
-    
-    // Replace in order: longest to shortest to avoid partial replacements
-    const replacements = [
-      { old: oldVariations.get(CaseType.PascalCase)!, new: newVariations.get(CaseType.PascalCase)! },
-      { old: oldVariations.get(CaseType.camelCase)!, new: newVariations.get(CaseType.camelCase)! },
-      { old: oldVariations.get(CaseType.snake_case)!, new: newVariations.get(CaseType.snake_case)! },
-      { old: oldVariations.get(CaseType.kebabCase)!, new: newVariations.get(CaseType.kebabCase)! },
-      { old: oldVariations.get(CaseType.UPPER_CASE)!, new: newVariations.get(CaseType.UPPER_CASE)! },
-    ];
-    
-    // Sort by length (longest first) to avoid partial matches
-    replacements.sort((a, b) => b.old.length - a.old.length);
-    
-    // Replace each variation
-    for (const { old, new: newVal } of replacements) {
-      if (old && newVal && old !== newVal) {
-        // Use global regex with word boundaries for more accurate replacement
-        const regex = new RegExp(this.escapeRegex(old), 'g');
-        result = result.replace(regex, newVal);
-      }
-    }
-    
-    // Also try to replace individual words for partial matches
+    let result = this.replaceVariations(content, oldFeatureName, newFeatureName);
     result = this.replacePartialMatches(result, oldFeatureName, newFeatureName);
-    
     return result;
   }
 
@@ -92,21 +64,106 @@ export class ContentReplacer {
    * Replace feature name in file path
    */
   replaceInPath(filePath: string, oldFeatureName: string, newFeatureName: string): string {
-    // Get all case variations
+    return this.replaceVariations(filePath, oldFeatureName, newFeatureName);
+  }
+
+  /**
+   * Replace old feature name variations with new ones, using context to resolve ambiguities.
+   * When a single-word source name (e.g. "brand") produces the same string for multiple case types
+   * (camelCase, snake_case, kebab-case all yield "brand"), this method inspects surrounding
+   * characters to decide whether to replace with "bugReport", "bug_report", or "bug-report".
+   */
+  private replaceVariations(text: string, oldFeatureName: string, newFeatureName: string): string {
     const oldVariations = getAllCaseVariations(oldFeatureName);
     const newVariations = getAllCaseVariations(newFeatureName);
-    
-    let result = filePath;
-    
-    // Replace each variation in the path
+    const defaultCaseType = this.getDefaultCaseType(newFeatureName);
+
+    let result = text;
+
+    // Group old values to detect ambiguities (different case types producing the same string)
+    const oldValueToTypes = new Map<string, CaseType[]>();
     for (const [caseType, oldVal] of oldVariations) {
-      const newVal = newVariations.get(caseType);
-      if (oldVal && newVal) {
-        result = result.replace(new RegExp(this.escapeRegex(oldVal), 'g'), newVal);
+      if (!oldVal) { continue; }
+      const types = oldValueToTypes.get(oldVal) || [];
+      types.push(caseType);
+      oldValueToTypes.set(oldVal, types);
+    }
+
+    // Sort unique old values by length (longest first) to avoid partial replacements
+    const sortedEntries = Array.from(oldValueToTypes.entries())
+      .sort((a, b) => b[0].length - a[0].length);
+
+    for (const [oldVal, caseTypes] of sortedEntries) {
+      // Check if all case types map to the same new value (no ambiguity)
+      const uniqueNewVals = new Set(caseTypes.map(ct => newVariations.get(ct)!));
+
+      if (uniqueNewVals.size <= 1) {
+        const newVal = newVariations.get(caseTypes[0])!;
+        if (oldVal && newVal && oldVal !== newVal) {
+          result = result.replace(new RegExp(this.escapeRegex(oldVal), 'g'), newVal);
+        }
+      } else {
+        // Ambiguous: same old value maps to different new values.
+        // Use surrounding context to pick the right replacement.
+        const regex = new RegExp(this.escapeRegex(oldVal), 'g');
+        const textToSearch = result;
+        result = result.replace(regex, (match, offset) => {
+          const detectedType = this.detectCaseFromContext(
+            textToSearch, offset, match.length, caseTypes, defaultCaseType
+          );
+          return newVariations.get(detectedType) || match;
+        });
       }
     }
-    
+
     return result;
+  }
+
+  /**
+   * Detect which case type is being used at a specific match position based on surrounding characters.
+   */
+  private detectCaseFromContext(
+    text: string,
+    offset: number,
+    matchLength: number,
+    possibleTypes: CaseType[],
+    defaultType: CaseType
+  ): CaseType {
+    const charAfter = offset + matchLength < text.length ? text[offset + matchLength] : '';
+    const charBefore = offset > 0 ? text[offset - 1] : '';
+
+    // Character after the match is the strongest signal
+    if (charAfter === '_' && possibleTypes.includes(CaseType.snake_case)) {
+      return CaseType.snake_case;
+    }
+    if (charAfter === '-' && possibleTypes.includes(CaseType.kebabCase)) {
+      return CaseType.kebabCase;
+    }
+    if (/[A-Z]/.test(charAfter) && possibleTypes.includes(CaseType.camelCase)) {
+      return CaseType.camelCase;
+    }
+
+    // Character before the match
+    if (charBefore === '_' && possibleTypes.includes(CaseType.snake_case)) {
+      // Distinguish true snake_case (e.g. "some_brand") from a Dart private prefix (e.g. "_brandDetails")
+      if (offset > 1 && /[a-z0-9]/.test(text[offset - 2])) {
+        return CaseType.snake_case;
+      }
+    }
+    if (charBefore === '-' && possibleTypes.includes(CaseType.kebabCase)) {
+      return CaseType.kebabCase;
+    }
+
+    // No clear signal — fall back to the case type of the user-entered name
+    return possibleTypes.includes(defaultType) ? defaultType : possibleTypes[0];
+  }
+
+  /**
+   * Get the default case type from the feature name as entered by the user.
+   */
+  private getDefaultCaseType(featureName: string): CaseType {
+    const detected = detectCaseType(featureName);
+    return detected !== CaseType.Unknown ? detected : CaseType.snake_case;
   }
 
   /**
