@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.5] - 2026-04-05
+
+### Fixed
+- Fixed file and path naming when cloning single-word features (e.g. `brand` → `bug_report`). Previously, file names like `brand_details_cubit.dart` were incorrectly renamed to `bugReport_details_cubit.dart` instead of `bug_report_details_cubit.dart`. The cloner now detects the surrounding context (`_`, `-`, uppercase letter) to apply the correct case variant, while class names and variables continue to follow language conventions (`BugReportDetailsCubit`, `bugReportSlug`).
+
 ## [1.0.3] - 2026-04-04
 
 ### Fixed
