@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.7] - 2026-04-05
+
+### Fixed
+- Generated React/Next.js route files are now named `page.tsx` / `page.jsx` (lowercase) instead of `Page.tsx` / `Page.jsx`, matching the App Router file convention and avoiding issues on case-sensitive filesystems.
+
 ## [1.0.5] - 2026-04-05
 
 ### Added
