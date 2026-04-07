@@ -74,9 +74,28 @@ export class ContentReplacer {
    * characters to decide whether to replace with "bugReport", "bug_report", or "bug-report".
    */
   private replaceVariations(text: string, oldFeatureName: string, newFeatureName: string): string {
-    const oldVariations = getAllCaseVariations(oldFeatureName);
-    const newVariations = getAllCaseVariations(newFeatureName);
-    const defaultCaseType = this.getDefaultCaseType(newFeatureName);
+    // First pass: replace exact feature name variations (longest match first)
+    let result = this.applyVariationReplacements(text, oldFeatureName, newFeatureName);
+
+    // Second pass: replace singular/stem forms if the feature name is plural
+    // e.g. source "contributions" → also replace "contribution" with target stem
+    const oldStem = this.deriveStem(oldFeatureName);
+    if (oldStem) {
+      const newStem = this.deriveStem(newFeatureName) || newFeatureName;
+      result = this.applyVariationReplacements(result, oldStem, newStem);
+    }
+
+    return result;
+  }
+
+  /**
+   * Core replacement logic: generate all case variations of oldName, replace with newName variations.
+   * Handles ambiguous single-word names using surrounding context detection.
+   */
+  private applyVariationReplacements(text: string, oldName: string, newName: string): string {
+    const oldVariations = getAllCaseVariations(oldName);
+    const newVariations = getAllCaseVariations(newName);
+    const defaultCaseType = this.getDefaultCaseType(newName);
 
     let result = text;
 
@@ -117,6 +136,37 @@ export class ContentReplacer {
     }
 
     return result;
+  }
+
+  /**
+   * Derive the singular/stem form of a feature name by removing common plural suffixes.
+   * Returns null if no stem change is detected.
+   */
+  private deriveStem(name: string): string | null {
+    const lower = name.toLowerCase();
+
+    // Skip names ending in 'ss' (class, process), 'us' (status), 'is' (analysis)
+    if (lower.endsWith('ss') || lower.endsWith('us') || lower.endsWith('is')) {
+      return null;
+    }
+
+    // -ies → -y (categories → category, user_stories → user_story)
+    if (lower.endsWith('ies') && lower.length > 3) {
+      return name.slice(0, -3) + 'y';
+    }
+
+    // -ses, -xes, -zes, -ches, -shes → remove -es (addresses → address)
+    if (lower.length > 3 && (lower.endsWith('ses') || lower.endsWith('xes') ||
+        lower.endsWith('zes') || lower.endsWith('ches') || lower.endsWith('shes'))) {
+      return name.slice(0, -2);
+    }
+
+    // -s → remove -s (contributions → contribution)
+    if (lower.endsWith('s') && lower.length > 1) {
+      return name.slice(0, -1);
+    }
+
+    return null;
   }
 
   /**

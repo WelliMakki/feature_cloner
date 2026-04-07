@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+
+## [1.0.8] - 2026-04-07
+
+### Fixed
+- Fixed cloning of plural-named features (e.g. `contributions` → `new_feature`). Previously, only the exact plural form was replaced — class names like `ContributionModel`, `ContributionNotifier`, file names like `contribution_model.dart`, and variables like `contributionRepo` were left unchanged. The cloner now automatically derives the singular/stem form and replaces both plural and singular variations across file names and content. Supported patterns: `-s`, `-es`, `-ies`.
+- Generated React/Next.js route files are now named `page.tsx` / `page.jsx` (lowercase) instead of `Page.tsx` / `Page.jsx`, matching the App Router file convention.
+
 ## [1.0.7] - 2026-04-05
 
 ### Fixed
