@@ -2,7 +2,7 @@
   "name": "feature-cloner",
   "displayName": "Feature Cloner",
   "description": "Intelligently clone feature folder structures with automatic architecture detection",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -67,8 +67,8 @@
   "devDependencies": {
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.75.0",
-    "esbuild": "^0.19.0",
-    "typescript": "^5.0.0",
-    "@vscode/vsce": "^2.22.0"
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.0.0"
   }
 }
