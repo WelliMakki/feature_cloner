@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file.
 
 
+## [1.0.9] - 2026-04-28
+
+### Added
+- Node.js template cloning now supports service-layer scaffolding when a `service`/`services` layer exists, with CRUD-aligned placeholders across controller, service, and routes.
+- Generated Node model placeholders now include practical guidance sections for indexing, virtuals, and hooks with example snippets to speed up customization.
+- Added a manual release helper script at `scripts/release-vsix.sh` to streamline VSIX packaging without Azure login automation.
+- Added npm release shortcuts for semver bump choice: `release:vsix`, `release:vsix:patch`, `release:vsix:minor`, and `release:vsix:major`.
+
+### Changed
+- Node.js clone behavior now defaults to template-first placeholders for generated layers (`models`, `controllers`, `routes`, and optional `services`) to avoid carrying source business logic into new features.
+- Controller, service, and route placeholder comments were improved to be more actionable and consistent with common backend API response patterns.
+
+### Fixed
+- Fixed plain MVC clones occasionally preserving original endpoint logic when option flags were not present; Node generated files now still receive placeholder transformation via fallback detection.
+- Fixed route scaffolding occasionally binding to the wrong identifier (e.g. `express` instead of the controller import), causing invalid generated route handlers.
+- Fixed feature-name inference for controller/route files that use snake_case or kebab-case naming patterns.
+- Fixed Node template output leaking legacy source references by stripping stale top-level helper imports from placeholderized services.
+- Fixed Node model placeholder cleanup to remove virtuals, schema methods/statics, and pre/post hooks from cloned templates.
+- Fixed lingering legacy comments in placeholderized schemas (including index/virtual/upload-image notes) to keep generated templates clean.
+
 ## [1.0.8] - 2026-04-07
 
 ### Fixed

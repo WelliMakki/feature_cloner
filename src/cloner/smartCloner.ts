@@ -6,10 +6,13 @@ import * as path from 'path';
 import { FileNode } from '../utils/fileSystem';
 import { ensureDirectory, readFileContent, writeFileContent, pathExists } from '../utils/fileSystem';
 import { ContentReplacer } from './contentReplacer';
+import { NodeEndpointPlaceholderReplacer } from './nodeEndpointPlaceholderReplacer';
+import { SchemaPlaceholderReplacer } from './schemaPlaceholderReplacer';
 import { ScannedStructure } from '../scanner/structureScanner';
 import { toPascalCase } from '../utils/naming';
 
 export type CloneScopeMode = 'full' | 'subfolders';
+export type NodeSchemaFieldMode = 'preserve' | 'placeholder';
 
 export interface CloneOptions {
   sourceFeatureName: string;
@@ -17,6 +20,9 @@ export interface CloneOptions {
   targetDirectory: string;
   scopeMode?: CloneScopeMode;
   selectedSubfolders?: string[];
+  nodeSchemaFieldMode?: NodeSchemaFieldMode;
+  nodeIncludeServiceLayerFiles?: boolean;
+  nodeEnableServiceLayerPlaceholders?: boolean;
   allowMergeIntoExistingRoot?: boolean;
   dryRun?: boolean;
 }
@@ -31,9 +37,13 @@ export interface CloneResult {
 
 export class SmartCloner {
   private contentReplacer: ContentReplacer;
+  private nodeEndpointPlaceholderReplacer: NodeEndpointPlaceholderReplacer;
+  private schemaPlaceholderReplacer: SchemaPlaceholderReplacer;
 
   constructor() {
     this.contentReplacer = new ContentReplacer();
+    this.nodeEndpointPlaceholderReplacer = new NodeEndpointPlaceholderReplacer();
+    this.schemaPlaceholderReplacer = new SchemaPlaceholderReplacer();
   }
 
   /**
@@ -148,6 +158,10 @@ export class SmartCloner {
       return true; // Directories are handled separately
     }
 
+    if (options.nodeIncludeServiceLayerFiles && this.isNodeServiceLayerFile(node.path)) {
+      return true;
+    }
+
     const featureTokens = this.tokenize(options.sourceFeatureName);
     const fileTokens = this.tokenize(node.name);
 
@@ -159,6 +173,27 @@ export class SmartCloner {
     const compactFileName = this.normalizeCompact(node.name);
     const compactFeatureName = this.normalizeCompact(options.sourceFeatureName);
     return compactFeatureName.length > 0 && compactFileName.includes(compactFeatureName);
+  }
+
+  /**
+   * Check whether a file belongs to the Node service layer.
+   */
+  private isNodeServiceLayerFile(filePath: string): boolean {
+    const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
+    return /\/services?\//.test(normalizedPath);
+  }
+
+  /**
+   * Check whether a file looks like Node generated feature layer file.
+   */
+  private isNodeGeneratedFile(filePath: string): boolean {
+    const ext = path.extname(filePath).toLowerCase();
+    if (!['.js', '.ts', '.cjs', '.mjs', '.cts', '.mts'].includes(ext)) {
+      return false;
+    }
+
+    const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
+    return /\/(models?|schemas?|entities?|controllers?|routes?|services?)\//.test(normalizedPath);
   }
 
   /**
@@ -175,11 +210,29 @@ export class SmartCloner {
       const content = await readFileContent(sourceNode.path);
 
       // Replace feature names in content
-      const newContent = this.contentReplacer.replaceContent(
+      let newContent = this.contentReplacer.replaceContent(
         content,
         options.sourceFeatureName,
         options.targetFeatureName
       );
+
+      const shouldApplyNodePlaceholders =
+        options.nodeSchemaFieldMode === 'placeholder' ||
+        (options.nodeSchemaFieldMode === undefined && this.isNodeGeneratedFile(sourceNode.path));
+
+      if (shouldApplyNodePlaceholders) {
+        newContent = this.schemaPlaceholderReplacer.replaceIfApplicable(
+          newContent,
+          sourceNode.path
+        );
+        newContent = this.nodeEndpointPlaceholderReplacer.replaceIfApplicable(
+          newContent,
+          sourceNode.path,
+          {
+            allowServiceLayer: options.nodeEnableServiceLayerPlaceholders ?? false
+          }
+        );
+      }
 
       // Write to target
       if (!options.dryRun) {

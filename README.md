@@ -8,9 +8,16 @@ Intelligently clone feature folder structures with automatic architecture detect
 - **Smart File Filtering**: Only clones files that contain the feature name, skipping unrelated files
 - **Structure Preservation**: Maintains folder hierarchy (even empty folders) for consistency
 - **Intelligent Replacement**: Updates class names, imports, and references with proper case handling
+- **Node.js Placeholders**: Optionally replace copied schemas, controllers, and routes with TODO placeholders
 - **Universal Support**: Works with any architecture (Flutter, React, Node.js, Android, etc.)
 - **Quick & Easy**: Simple right-click context menu integration
 - **Interactive Preview**: Review all changes before creating files
+
+## Demo
+
+![Feature Cloner walkthrough](images/demo.gif)
+
+The demo shows one example layout (Flutter-style folders). Feature Cloner is **not** limited to Flutter—you can use the same flow with **Node.js**, **TypeScript**, **React**, and other stacks whenever you work with feature-based folder structures.
 
 ## Quick Start
 
@@ -19,8 +26,9 @@ Intelligently clone feature folder structures with automatic architecture detect
 3. **Review** the detected architecture (press Enter to continue)
 4. **Enter** the new feature name
 5. **Choose** clone scope (full feature or specific subfolder(s))
-6. **Review** the files to be created (press Enter to confirm)
-7. **Done!** Your new feature is ready
+6. **For Node.js features**, choose whether to preserve generated content or use placeholders
+7. **Review** the files to be created (press Enter to confirm)
+8. **Done!** Your new feature is ready
 
 ## Changelog
 

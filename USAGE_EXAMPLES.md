@@ -118,7 +118,8 @@ server/features/user_auth/
 2. Select "Clone Feature Structure"
 3. Extension detects "MVC Express" architecture
 4. Enter: `product_catalog`
-5. Click "Create"
+5. If Node.js generated content is detected, choose whether to preserve schemas/controllers/routes or use placeholders
+6. Click "Create"
 
 ### Result
 ```
@@ -143,6 +144,26 @@ module.exports = UserAuthModel;
 ```javascript
 const ProductCatalogModel = mongoose.model('ProductCatalog', productCatalogSchema);
 module.exports = ProductCatalogModel;
+```
+
+When "Use schema placeholders" is selected for a Node.js feature, domain-specific fields and endpoint bodies are removed so the new feature starts clean:
+
+```javascript
+const productCatalogSchema = new Schema({
+  // TODO: Add properties for this model.
+}, { timestamps: true });
+```
+
+```javascript
+async create(req, res) {
+  try {
+    // TODO: Add handler logic.
+    res.json({});
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ message: 'Request failed', error: message });
+  }
+}
 ```
 
 ## Example 3: React Feature with Hooks

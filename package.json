@@ -2,7 +2,7 @@
   "name": "feature-cloner",
   "displayName": "Feature Cloner",
   "description": "Intelligently clone feature folder structures with automatic architecture detection",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -58,7 +58,11 @@
     "vscode:prepublish": "npm run compile",
     "compile": "node build.js",
     "watch": "node build.js --watch",
-    "package": "vsce package"
+    "package": "vsce package",
+    "release:vsix": "bash ./scripts/release-vsix.sh",
+    "release:vsix:patch": "bash ./scripts/release-vsix.sh patch",
+    "release:vsix:minor": "bash ./scripts/release-vsix.sh minor",
+    "release:vsix:major": "bash ./scripts/release-vsix.sh major"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",

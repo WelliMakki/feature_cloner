@@ -8,11 +8,16 @@ import * as fs from 'fs';
 import { StructureScanner } from '../scanner/structureScanner';
 import { PatternAnalyzer } from '../scanner/patternAnalyzer';
 import { SmartCloner, CloneOptions, CloneScopeMode } from '../cloner/smartCloner';
+import { CloneContext, CloneScopeSelection, StackCloneOptions } from './cloneContext';
+import { CloneHandler } from './handlers/cloneHandler';
+import { DefaultCloneHandler } from './handlers/defaultCloneHandler';
+import { NodeCloneHandler } from './handlers/nodeCloneHandler';
 
 export class CloneFeatureCommand {
   private scanner: StructureScanner;
   private analyzer: PatternAnalyzer;
   private cloner: SmartCloner;
+  private handlers: CloneHandler[];
   private readonly knownSubfolderNames = new Set([
     'provider',
     'providers',
@@ -88,6 +93,10 @@ export class CloneFeatureCommand {
     this.scanner = new StructureScanner();
     this.analyzer = new PatternAnalyzer();
     this.cloner = new SmartCloner();
+    this.handlers = [
+      new NodeCloneHandler(),
+      new DefaultCloneHandler()
+    ];
   }
 
   /**
@@ -150,12 +159,27 @@ export class CloneFeatureCommand {
 
       // Step 6: Determine target directory
       const targetDirectory = path.dirname(selectionContext.sourceFolderPath);
+      const handlerContext: CloneContext = {
+        structure,
+        pattern,
+        sourceFolderPath: selectionContext.sourceFolderPath,
+        targetDirectory,
+        targetFeatureName: newFeatureName,
+        cloneScope
+      };
+      const stackOptions = await this.collectStackCloneOptions(handlerContext);
+      if (!stackOptions) {
+        vscode.window.showInformationMessage('Clone operation cancelled.');
+        return;
+      }
+
       const cloneOptions: CloneOptions = {
         sourceFeatureName: structure.featureName,
         targetFeatureName: newFeatureName,
         targetDirectory,
         scopeMode: cloneScope.scopeMode,
-        selectedSubfolders: cloneScope.selectedSubfolders
+        selectedSubfolders: cloneScope.selectedSubfolders,
+        ...stackOptions
       };
 
       // Step 7: Build preview paths once (used for conflict checks and UI preview)
@@ -355,6 +379,19 @@ export class CloneFeatureCommand {
   }
 
   /**
+   * Collect stack-specific clone options from the first matching handler.
+   */
+  private async collectStackCloneOptions(context: CloneContext): Promise<StackCloneOptions | undefined> {
+    for (const handler of this.handlers) {
+      if (await handler.canHandle(context)) {
+        return await handler.collectOptions(context);
+      }
+    }
+
+    return {};
+  }
+
+  /**
    * Get the selected folder path
    */
   private async getSelectedFolder(uri?: vscode.Uri): Promise<string | undefined> {
@@ -390,7 +427,7 @@ export class CloneFeatureCommand {
     quickPick.placeholder = 'Review the architecture below, then scroll down and select an action ↓';
     
     // Create items showing the structure
-    const items = [
+    const items: vscode.QuickPickItem[] = [
       {
         label: '$(info) Architecture Details',
         kind: vscode.QuickPickItemKind.Separator
@@ -513,20 +550,22 @@ export class CloneFeatureCommand {
    */
   private async getCloneScope(
     structure: any
-  ): Promise<{ scopeMode: CloneScopeMode; selectedSubfolders?: string[] } | undefined> {
+  ): Promise<CloneScopeSelection | undefined> {
+    const scopeItems: Array<vscode.QuickPickItem & { scopeMode: CloneScopeMode }> = [
+      {
+        label: 'Clone full feature',
+        description: 'Copy all matching files and folders',
+        scopeMode: 'full'
+      },
+      {
+        label: 'Clone specific subfolder(s)',
+        description: 'Choose one or more top-level folders only',
+        scopeMode: 'subfolders'
+      }
+    ];
+
     const scopeSelection = await vscode.window.showQuickPick(
-      [
-        {
-          label: 'Clone full feature',
-          description: 'Copy all matching files and folders',
-          scopeMode: 'full' as CloneScopeMode
-        },
-        {
-          label: 'Clone specific subfolder(s)',
-          description: 'Choose one or more top-level folders only',
-          scopeMode: 'subfolders' as CloneScopeMode
-        }
-      ],
+      scopeItems,
       {
         title: 'Choose clone scope',
         placeHolder: 'Select how much of the feature to clone',
@@ -549,11 +588,13 @@ export class CloneFeatureCommand {
       return { scopeMode: 'full' };
     }
 
+    const subfolderItems: vscode.QuickPickItem[] = availableSubfolders.map((layer: string) => ({
+      label: layer,
+      description: `Clone only ${layer}/ into ${structure.featureName}`
+    }));
+
     const selectedSubfolders = await vscode.window.showQuickPick(
-      availableSubfolders.map((layer: string) => ({
-        label: layer,
-        description: `Clone only ${layer}/ into ${structure.featureName}`
-      })),
+      subfolderItems,
       {
         title: 'Select subfolder(s) to clone',
         placeHolder: 'Choose one or more top-level folders',
@@ -592,7 +633,7 @@ export class CloneFeatureCommand {
     quickPick.placeholder = `Review the files below, then scroll down and select an action ↓`;
     
     // Convert paths to relative and create items
-    const items = preview.map(p => {
+    const items: vscode.QuickPickItem[] = preview.map((p): vscode.QuickPickItem => {
       const relativePath = p.replace(/^.*\/test-examples\/[^/]+\//, '');
       const isDirectory = !relativePath.includes('.') || relativePath.endsWith('/');
       return {

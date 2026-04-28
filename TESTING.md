@@ -100,8 +100,10 @@ After cloning a feature, verify:
 
 1. Create or use an existing Node.js project
 2. Clone a feature (e.g., MVC controller/model/route)
-3. Run linting to check for errors
-4. Test the cloned feature
+3. If the feature has Node.js schemas/controllers/routes, verify the prompt offers `Preserve schema fields` and `Use schema placeholders`
+4. Choose `Use schema placeholders` and confirm domain-specific schema fields and endpoint bodies are replaced with TODOs while timestamp fields/options remain
+5. Run linting to check for errors
+6. Test the cloned feature
 
 ### React Project
 
